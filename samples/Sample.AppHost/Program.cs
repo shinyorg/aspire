@@ -26,9 +26,26 @@ var silo = builder.AddProject<Projects.Sample_Silo>("silo")
     .WaitFor(db);
 
 // --- API (client) ---
-builder.AddProject<Projects.Sample_Api>("api")
+var api = builder.AddProject<Projects.Sample_Api>("api")
     .WithReference(orleans.AsClient())
     .WaitFor(silo);
+
+// --- Tunnelling ---
+// A public HTTPS address for the API, with no account and nothing installed. The address changes
+// on every reconnect, so it is handed to the API rather than written down anywhere.
+api.WithQuickTunnel(name: "api-public");
+
+// The relay hosted right here, which is what a MAUI app running Shiny.Net.HttpServer registers
+// into — control on 5050, public traffic on 8080.
+var relay = builder.AddShinyRelay("relay")
+    .WithToken("dev-token")
+    .WithDomain("localtest.me");
+
+// The same API published a second way, through that relay.
+api.WithShinyRelayTunnel(relay, subdomain: "api", name: "api-relayed");
+
+// ...and cloudflared in a container, for comparison:
+// api.WithCloudflareTunnel(name: "api-cloudflare");
 
 // --- Gluetun VPN container (demo) ---
 var gluetun = builder.AddGluetun("vpn")

@@ -2,7 +2,7 @@
 
 Zero-friction integration between [.NET Aspire](https://learn.microsoft.com/dotnet/aspire/) and [Microsoft Orleans](https://learn.microsoft.com/dotnet/orleans/) for ADO.NET storage backends. Automatically provisions Orleans database schemas and wires up clustering, grain persistence, and reminders from Aspire configuration — no manual SQL scripts or connection string plumbing required.
 
-Also includes an Aspire hosting integration for [Gluetun](https://github.com/qdm12/gluetun) VPN containers.
+Also includes Aspire hosting integrations for [Gluetun](https://github.com/qdm12/gluetun) VPN containers, and for tunnelling — giving a project or container endpoint a public address, hosting the Shiny relay in the app model, and reaching services on the far side of a bastion.
 
 ## Supported Databases
 
@@ -18,6 +18,11 @@ Also includes an Aspire hosting integration for [Gluetun](https://github.com/qdm
 | `Shiny.Aspire.Orleans.Server` | [![NuGet](https://img.shields.io/nuget/v/Shiny.Aspire.Orleans.Server.svg)](https://www.nuget.org/packages/Shiny.Aspire.Orleans.Server) | Orleans silo — registers ADO.NET providers for clustering, grain storage, and reminders |
 | `Shiny.Aspire.Orleans.Client` | [![NuGet](https://img.shields.io/nuget/v/Shiny.Aspire.Orleans.Client.svg)](https://www.nuget.org/packages/Shiny.Aspire.Orleans.Client) | Orleans client — registers ADO.NET clustering provider |
 | `Shiny.Aspire.Hosting.Gluetun` | [![NuGet](https://img.shields.io/nuget/v/Shiny.Aspire.Hosting.Gluetun.svg)](https://www.nuget.org/packages/Shiny.Aspire.Hosting.Gluetun) | Aspire AppHost — adds a Gluetun VPN container and routes other containers through it |
+| `Shiny.Aspire.Hosting.Tunnel` | [![NuGet](https://img.shields.io/nuget/v/Shiny.Aspire.Hosting.Tunnel.svg)](https://www.nuget.org/packages/Shiny.Aspire.Hosting.Tunnel) | Aspire AppHost — the tunnel resource, the pluggable provider, and the Shiny relay hosted in the app model |
+| `Shiny.Aspire.Hosting.Tunnel.Ssh` | [![NuGet](https://img.shields.io/nuget/v/Shiny.Aspire.Hosting.Tunnel.Ssh.svg)](https://www.nuget.org/packages/Shiny.Aspire.Hosting.Tunnel.Ssh) | Zero-account quick tunnels, SSH remote forwarding, and local forwards to services behind a bastion |
+| `Shiny.Aspire.Hosting.Tunnel.AzureRelay` | [![NuGet](https://img.shields.io/nuget/v/Shiny.Aspire.Hosting.Tunnel.AzureRelay.svg)](https://www.nuget.org/packages/Shiny.Aspire.Hosting.Tunnel.AzureRelay) | Azure Relay Hybrid Connections — a stable public address with no inbound connectivity |
+| `Shiny.Aspire.Hosting.Tunnel.Cloudflare` | [![NuGet](https://img.shields.io/nuget/v/Shiny.Aspire.Hosting.Tunnel.Cloudflare.svg)](https://www.nuget.org/packages/Shiny.Aspire.Hosting.Tunnel.Cloudflare) | `cloudflared` as a container resource — quick tunnels and named tunnels |
+| `Shiny.Aspire.Hosting.Tunnel.Ngrok` | [![NuGet](https://img.shields.io/nuget/v/Shiny.Aspire.Hosting.Tunnel.Ngrok.svg)](https://www.nuget.org/packages/Shiny.Aspire.Hosting.Tunnel.Ngrok) | The ngrok agent as a container resource, with the assigned address surfaced as a connection string |
 
 ## Quick Start
 
@@ -213,7 +218,7 @@ The `samples/` directory contains a complete working example:
 
 | Project | Description |
 |---|---|
-| `Sample.AppHost` | Aspire orchestrator wiring PostgreSQL + PgAdmin, Orleans cluster, API, Gluetun VPN |
+| `Sample.AppHost` | Aspire orchestrator wiring PostgreSQL + PgAdmin, Orleans cluster, API, Gluetun VPN, and tunnels |
 | `Sample.Silo` | Orleans silo with ADO.NET providers |
 | `Sample.Api` | HTTP API with counter and reminder endpoints via `IClusterClient` |
 | `Sample.GrainInterfaces` | `ICounterGrain` and `IReminderGrain` interfaces |
@@ -367,8 +372,192 @@ services:
 
 Gluetun supports 30+ VPN providers. See the [Gluetun wiki](https://github.com/qdm12/gluetun-wiki) for the full list and provider-specific environment variables. Use `WithGluetunEnvironment` for any provider-specific settings not covered by the typed methods.
 
+---
+
+# Shiny.Aspire.Hosting.Tunnel
+
+A public address for something that is only listening on localhost.
+
+The problem is the same one [Shiny.Net.HttpServer](https://github.com/shinyorg/httpserver) solves for
+an embedded server, and the pieces are the same pieces: a pluggable `ITunnelProvider`, the Shiny
+relay at both ends, SSH remote forwarding, zero-account quick tunnels, and Azure Relay. What changes
+is who runs them — here it is the AppHost, on behalf of a resource in the app model.
+
+A tunnel is a resource. Its public URL is its connection string, so everything Aspire already knows
+how to do with a connection string works: `WithReference(tunnel)` injects it, `WithTunnelUrl` names
+it, and both wait for the tunnel to actually open before the resource that needs it starts.
+
+## Quick Start
+
+```csharp
+var builder = DistributedApplication.CreateBuilder(args);
+
+var api = builder.AddProject<Projects.Api>("api");
+
+// A public HTTPS address, no account, nothing installed.
+api.WithQuickTunnel();
+
+builder.Build().Run();
+```
+
+The address appears on the tunnel resource in the dashboard. To give it to the service that needs to
+hand it out — an OAuth redirect URI, a webhook registration, a QR code:
+
+```csharp
+var tunnel = builder.AddQuickTunnel("public");
+
+builder.AddProject<Projects.Api>("api")
+    .WithTunnel(tunnel)
+    .WithTunnelUrl("PUBLIC_URL", tunnel);
+```
+
+That is not circular. A tunnel opens as soon as its target's **endpoints are allocated**, which
+happens before the target process is launched — so a service is allowed to need its own public URL.
+
+## Choosing a provider
+
+| | Address | Needs | Good for |
+|---|---|---|---|
+| `WithQuickTunnel()` | assigned, changes on reconnect | nothing | a webhook you are debugging right now, showing work to someone |
+| `WithSshTunnel(host, …)` | yours | an SSH server you can log in to | a stable address on infrastructure you already own |
+| `WithShinyRelayTunnel(relay)` | yours | the relay, hosted here or on your VPS | devices and embedded servers registering into a dev environment |
+| `WithAzureRelayTunnel(cs)` | stable, yours | an Azure Relay namespace | enterprise networks; an integration configured once |
+| `WithCloudflareTunnel()` | assigned, or your domain | Docker; an account for named tunnels | teams already on Cloudflare |
+| `WithNgrokTunnel(token)` | assigned, or a reserved domain | Docker; an ngrok account | teams already on ngrok |
+
+The first four run inside the AppHost — managed code, no daemon, no binary to install, identical on
+every developer's machine and in CI. The last two run the vendor's agent in a container.
+
+## Quick tunnels
+
+```csharp
+api.WithQuickTunnel();                                    // pinggy.io, the default
+api.WithQuickTunnel(QuickTunnelHost.Sish);                // tuns.sh
+api.WithQuickTunnel(subdomain: "<pinggy-access-token>");  // lifts the 60-minute anonymous cap
+```
+
+Traffic through a free tunnel passes through someone else's server, and these hosts publish no
+stable key to pin — `AcceptAnyHostKey` is on for them, deliberately and visibly.
+
+## SSH
+
+```csharp
+api.WithSshTunnel("tunnel.example.com", ssh =>
+{
+    ssh.Username = "deploy";
+    ssh.PrivateKeyPath = "/Users/me/.ssh/id_ed25519";
+    ssh.RemoteBindAddress = "0.0.0.0";        // needs GatewayPorts on the server
+    ssh.RemotePort = 8080;
+    ssh.PublicUrl = "https://api.example.com"; // where it really answers, if a proxy fronts it
+    ssh.HostKeyFingerprints.Add("SHA256:47DEQpj8HBSa+…");
+});
+```
+
+The AppHost dials out and asks the server to forward a port back down the connection — `ssh -R`, in
+library form — pointed straight at the port Aspire allocated. Nothing connects in, so this works
+from behind NAT, from a CI runner, and from a network that allows nothing but outbound 443.
+
+## The Shiny relay
+
+The relay is the public end of a Shiny tunnel: a control port where clients register, and a public
+port where traffic arrives to be routed by Host header. Hosting it in the app model gives a MAUI app
+running Shiny.Net.HttpServer somewhere to register — a phone's embedded server, reachable from your
+development environment, with no cloud account and nothing listening on the phone.
+
+```csharp
+var relay = builder.AddShinyRelay("relay", controlPort: 5050, publicPort: 8080)
+    .WithToken(builder.AddParameter("relay-token", secret: true))
+    .WithDomain("localtest.me")
+    .WithBindAddress("0.0.0.0", clientHost: "192.168.1.20");   // so the phone can reach it
+
+api.WithShinyRelayTunnel(relay, subdomain: "api");
+```
+
+The relay's connection string is what a client needs to register —
+`Host=…;Port=…;UseTls=…;Token=…`, matching the properties of `RelayTunnelOptions` on the other side.
+
+Against a relay running somewhere else:
+
+```csharp
+api.WithShinyRelayTunnel("relay.example.com", port: 5050, token: token, subdomain: "api");
+```
+
+## Azure Relay
+
+```csharp
+var cs = builder.AddParameter("relay-cs", secret: true);
+
+api.WithAzureRelayTunnel(cs, hybridConnectionName: "api");
+```
+
+## Container agents
+
+```csharp
+api.WithCloudflareTunnel();                                  // throwaway trycloudflare.com address
+api.WithNgrokTunnel(builder.AddParameter("ngrok-token", secret: true));
+
+// A named Cloudflare tunnel, on a host name you control:
+builder.AddCloudflareTunnel("public")
+    .WithNamedTunnel(builder.AddParameter("cf-token", secret: true), "https://api.example.com");
+```
+
+Both agents pick their address at runtime and announce it in their own output, so it is read back
+out of the container's log stream and published from there.
+
+## Reaching a service through a bastion
+
+The other direction: something you cannot run locally and cannot reach directly.
+
+```csharp
+var db = builder
+    .AddSshPortForward("staging-db", "bastion.example.com", "10.0.0.5", 5432, ssh =>
+    {
+        ssh.Username = "ops";
+        ssh.PrivateKeyPath = "/Users/me/.ssh/id_ed25519";
+        ssh.AcceptAnyHostKey = true;
+    })
+    .WithConnectionString(f => ReferenceExpression.Create(
+        $"Host={f.Host};Port={f.Port};Database=app;Username=app;Password={password}"
+    ));
+
+builder.AddProject<Projects.Api>("api").WithReference(db);
+```
+
+The AppHost opens a local port that SSH carries to the far side, and the app model treats it as an
+ordinary dependency. Container resources reach it too — add `.WithContainerAccess()`, which binds
+every interface rather than loopback, and the host name resolves per caller.
+
+## Writing your own provider
+
+`AddTunnel` takes any `ITunnelProvider` — the same abstraction Shiny.Net.HttpServer tunnels through.
+Everything it hands over is pumped into the attached endpoint, byte for byte, so WebSockets, SSE and
+gRPC streaming pass through unchanged.
+
+```csharp
+var tunnel = builder.AddTunnel("public", "my-provider", (context, ct) =>
+    ValueTask.FromResult<ITunnelProvider>(new MyTunnelProvider(context.TargetHost, context.TargetPort))
+);
+
+api.WithTunnel(tunnel);
+```
+
+## Notes
+
+- **The target must be a cleartext endpoint.** TLS is terminated at the public end of the tunnel, so
+  what arrives is plain HTTP. The `http` endpoint is chosen by default for exactly this reason; name
+  another with `endpointName` only if it is also cleartext.
+- **Tunnels are excluded from the manifest.** They are a development-time affordance for reaching a
+  machine that is not on the internet; a deployed app has a real address.
+- **A quick tunnel's address changes on reconnect.** An environment variable handed to a running
+  process cannot be revised, so `WithTunnelUrl` resolves once and keeps that value. The dashboard
+  shows the current one.
+- **Anything reachable through a tunnel is reachable by anyone who has the URL.** These hostnames are
+  unguessable, not private. Put authentication in front of anything that matters.
+
 ## Requirements
 
 - .NET 10
 - .NET Aspire 13.1+
 - Microsoft Orleans 10.0+ (for Orleans packages only)
+- Shiny.Net.HttpServer 1.0.0-beta.11+ (for tunnel packages only)
+- Docker (for the Gluetun, Cloudflare and ngrok packages only)

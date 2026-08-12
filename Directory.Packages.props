@@ -2,6 +2,7 @@
     <PropertyGroup>
         <AspireVersion>13.1.2</AspireVersion>
         <OrleansVersion>10.0.1</OrleansVersion>
+        <HttpServerVersion>1.0.0-beta.11</HttpServerVersion>
     </PropertyGroup>
     <ItemGroup>
         <!-- Aspire Hosting -->
@@ -19,6 +20,11 @@
         <PackageVersion Include="Microsoft.Orleans.Persistence.AdoNet" Version="$(OrleansVersion)"/>
         <PackageVersion Include="Microsoft.Orleans.Reminders.AdoNet" Version="$(OrleansVersion)"/>
         <PackageVersion Include="Microsoft.Orleans.Dashboard" Version="$(OrleansVersion)"/>
+        <!-- Tunnelling -->
+        <PackageVersion Include="Shiny.Net.HttpServer" Version="$(HttpServerVersion)"/>
+        <PackageVersion Include="Shiny.Net.HttpServer.Ssh" Version="$(HttpServerVersion)"/>
+        <PackageVersion Include="Shiny.Net.HttpServer.AzureRelay" Version="$(HttpServerVersion)"/>
+        <PackageVersion Include="SSH.NET" Version="2026.0.0"/>
         <!-- ADO.NET Providers -->
         <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.4"/>
         <PackageVersion Include="Npgsql" Version="10.0.1"/>

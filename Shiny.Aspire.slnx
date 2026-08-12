@@ -22,6 +22,12 @@
   <Project Path="src/Shiny.Aspire.Orleans.Hosting/Shiny.Aspire.Orleans.Hosting.csproj" />
   <Project Path="src/Shiny.Aspire.Orleans.Server/Shiny.Aspire.Orleans.Server.csproj" />
   <Project Path="src/Shiny.Aspire.Hosting.Gluetun/Shiny.Aspire.Hosting.Gluetun.csproj" />
+  <Project Path="src/Shiny.Aspire.Hosting.Tunnel/Shiny.Aspire.Hosting.Tunnel.csproj" />
+  <Project Path="src/Shiny.Aspire.Hosting.Tunnel.Ssh/Shiny.Aspire.Hosting.Tunnel.Ssh.csproj" />
+  <Project Path="src/Shiny.Aspire.Hosting.Tunnel.AzureRelay/Shiny.Aspire.Hosting.Tunnel.AzureRelay.csproj" />
+  <Project Path="src/Shiny.Aspire.Hosting.Tunnel.Cloudflare/Shiny.Aspire.Hosting.Tunnel.Cloudflare.csproj" />
+  <Project Path="src/Shiny.Aspire.Hosting.Tunnel.Ngrok/Shiny.Aspire.Hosting.Tunnel.Ngrok.csproj" />
   <Project Path="tests/Shiny.Aspire.Orleans.Tests/Shiny.Aspire.Orleans.Tests.csproj" />
   <Project Path="tests/Shiny.Aspire.Hosting.Gluetun.Tests/Shiny.Aspire.Hosting.Gluetun.Tests.csproj" />
+  <Project Path="tests/Shiny.Aspire.Hosting.Tunnel.Tests/Shiny.Aspire.Hosting.Tunnel.Tests.csproj" />
 </Solution>

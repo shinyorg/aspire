@@ -1,6 +1,6 @@
 ---
 name: shiny-aspire-orleans
-description: Generate code using Shiny Aspire integrations — Orleans ADO.NET hosting and Gluetun VPN container routing
+description: Generate code using Shiny Aspire integrations — Orleans ADO.NET hosting, Gluetun VPN container routing, and tunnelling (public addresses for Aspire endpoints, the Shiny relay hosted in the app model, and SSH forwards to services behind a bastion)
 auto_invoke: true
 triggers:
   - aspire orleans
@@ -33,6 +33,44 @@ triggers:
   - GluetunResource
   - network_mode
   - vpn routing
+  - aspire tunnel
+  - tunnel aspire
+  - public url aspire
+  - webhook local development
+  - AddTunnel
+  - WithTunnel
+  - WithTunnelUrl
+  - WithQuickTunnel
+  - AddQuickTunnel
+  - WithSshTunnel
+  - AddSshTunnel
+  - AddSshPortForward
+  - WithShinyRelayTunnel
+  - AddShinyRelay
+  - WithAzureRelayTunnel
+  - AddAzureRelayTunnel
+  - WithCloudflareTunnel
+  - AddCloudflareTunnel
+  - WithNgrokTunnel
+  - AddNgrokTunnel
+  - TunnelResource
+  - ITunnelResource
+  - InProcessTunnelResource
+  - ContainerTunnelResource
+  - SshTunnelResource
+  - SshPortForwardResource
+  - ShinyRelayResource
+  - CloudflaredResource
+  - NgrokResource
+  - ITunnelProvider
+  - Shiny.Aspire.Hosting.Tunnel
+  - ngrok aspire
+  - cloudflared aspire
+  - quick tunnel
+  - pinggy
+  - ssh port forward
+  - bastion
+  - reverse tunnel
 ---
 
 # Shiny Aspire Skill
@@ -41,6 +79,7 @@ You are an expert in Shiny's .NET Aspire integrations:
 
 1. **Shiny.Aspire.Orleans** — Zero-friction integration between .NET Aspire and Microsoft Orleans for ADO.NET storage backends. Automatically provisions Orleans database schemas and wires up clustering, grain persistence, and reminders from Aspire configuration.
 2. **Shiny.Aspire.Hosting.Gluetun** — Aspire hosting integration for Gluetun VPN containers. Models Gluetun as a first-class Aspire resource and lets other containers route their traffic through the VPN tunnel.
+3. **Shiny.Aspire.Hosting.Tunnel** (and `.Ssh`, `.AzureRelay`, `.Cloudflare`, `.Ngrok`) — tunnelling. Gives a project or container endpoint a public address, hosts the Shiny relay in the app model, and reaches services on the far side of an SSH bastion. Built on the same `ITunnelProvider` abstraction as Shiny.Net.HttpServer.
 
 ## When to Use This Skill
 
@@ -59,6 +98,12 @@ Invoke this skill when the user wants to:
 - Configure VPN providers, WireGuard, or OpenVPN in Aspire
 - Use `AddGluetun`, `WithRoutedContainer`, `WithVpnProvider`, `WithWireGuard`, or `WithOpenVpn`
 - Set up Docker Compose publishing with VPN network mode and port transfer
+- Give an Aspire project or container a public URL for webhooks, OAuth redirects, or a demo
+- Use `WithQuickTunnel`, `WithSshTunnel`, `WithShinyRelayTunnel`, `WithAzureRelayTunnel`, `WithCloudflareTunnel` or `WithNgrokTunnel`
+- Hand a resource its own public URL with `WithTunnelUrl`
+- Host the Shiny relay in the app model with `AddShinyRelay` so devices or MAUI apps can register into it
+- Reach a database or API behind an SSH bastion with `AddSshPortForward`
+- Plug a custom `ITunnelProvider` in with `AddTunnel`
 
 ## Library Overview
 
@@ -75,6 +120,11 @@ Invoke this skill when the user wants to:
 | `Shiny.Aspire.Orleans.Server` | Install in Orleans silo | Registers ADO.NET provider builders for clustering, grain storage, and reminders |
 | `Shiny.Aspire.Orleans.Client` | Install in Orleans client | Registers ADO.NET provider builder for clustering |
 | `Shiny.Aspire.Hosting.Gluetun` | Install in Aspire AppHost | Adds a Gluetun VPN container and routes other containers through it |
+| `Shiny.Aspire.Hosting.Tunnel` | Install in Aspire AppHost | The tunnel resource, the pluggable provider, and the Shiny relay hosted in the app model |
+| `Shiny.Aspire.Hosting.Tunnel.Ssh` | Install in Aspire AppHost | Quick tunnels, SSH remote forwarding, and local forwards through a bastion |
+| `Shiny.Aspire.Hosting.Tunnel.AzureRelay` | Install in Aspire AppHost | Azure Relay Hybrid Connections |
+| `Shiny.Aspire.Hosting.Tunnel.Cloudflare` | Install in Aspire AppHost | `cloudflared` as a container resource |
+| `Shiny.Aspire.Hosting.Tunnel.Ngrok` | Install in Aspire AppHost | The ngrok agent as a container resource |
 
 ### Supported Databases
 
@@ -527,3 +577,232 @@ Stored on the Gluetun resource. References each container that routes through it
 5. **Use `WithGluetunEnvironment` for provider-specific settings** — the typed methods cover common settings, but many providers have additional options documented in the Gluetun wiki.
 6. **Use `WithFirewallOutboundSubnets` for local network access** — if routed containers need to reach local services (databases, APIs) outside the VPN, allow those subnets explicitly.
 7. **Multiple containers can share one VPN** — call `WithRoutedContainer` multiple times on the same Gluetun resource.
+
+---
+
+# Shiny.Aspire.Hosting.Tunnel
+
+Gives something that is only listening on localhost a public address. Install
+`Shiny.Aspire.Hosting.Tunnel` plus the provider package you need, in the **AppHost** project only —
+nothing is installed in the projects being published.
+
+## The core idea
+
+A tunnel is a resource whose **public URL is its connection string**. That single decision is what
+makes the rest work without new concepts:
+
+- `WithReference(tunnel)` injects it as `ConnectionStrings__<name>`
+- `WithTunnelUrl("PUBLIC_URL", tunnel)` names the variable yourself
+- both wait for the tunnel to actually open before the referencing resource starts
+
+A tunnel opens when its target's **endpoints are allocated**, which is before the target process is
+launched. A service may therefore reference its own tunnel — the usual case, since a webhook
+receiver has to hand out its own address.
+
+## Choosing a provider
+
+| Method | Package | Address | Needs |
+|---|---|---|---|
+| `WithQuickTunnel()` | `.Ssh` | assigned, changes on reconnect | nothing |
+| `WithSshTunnel(host, configure)` | `.Ssh` | yours | an SSH server you can log in to |
+| `WithShinyRelayTunnel(relay)` | core | yours | the relay, hosted here or elsewhere |
+| `WithAzureRelayTunnel(cs)` | `.AzureRelay` | stable, yours | an Azure Relay namespace |
+| `WithCloudflareTunnel()` | `.Cloudflare` | assigned, or your domain | Docker |
+| `WithNgrokTunnel(token)` | `.Ngrok` | assigned, or reserved domain | Docker + an ngrok account |
+
+The first four run inside the AppHost as managed code. The last two run the vendor's agent in a
+container.
+
+## Two spellings, always
+
+Every provider offers `AddXTunnel(...)` on the builder (returns the tunnel, for referencing it) and
+`WithXTunnel(...)` on a target resource (creates and attaches it in one line, returns the target).
+
+```csharp
+// Attach in one line — the tunnel resource is named "{target}-tunnel"
+api.WithQuickTunnel();
+
+// Keep a handle, because something needs the URL
+var tunnel = builder.AddQuickTunnel("public");
+api.WithTunnel(tunnel);
+worker.WithTunnelUrl("API_PUBLIC_URL", tunnel);
+```
+
+Give `name:` explicitly when a resource has **more than one** tunnel — both default to
+`{target}-tunnel` and Aspire rejects duplicate resource names.
+
+## Quick tunnels (`.Ssh`)
+
+```csharp
+api.WithQuickTunnel();                                   // pinggy.io, the default
+api.WithQuickTunnel(QuickTunnelHost.Sish);               // tuns.sh
+api.WithQuickTunnel(subdomain: "<access-token>");        // pinggy: lifts the 60-minute cap
+api.WithQuickTunnel(configure: o => o.AutoReconnect = false);
+```
+
+`QuickTunnelHost` values are `Pinggy` (default), `Sish`, `Serveo`, `LocalhostRun`. Prefer `Pinggy`:
+it reports the address it assigns in a form that can actually be read back. `LocalhostRun` never
+confirms the session request carrying the URL, so it needs `o.PublicUrl` set explicitly.
+
+## SSH (`.Ssh`)
+
+```csharp
+api.WithSshTunnel("tunnel.example.com", ssh =>
+{
+    ssh.Username = "deploy";
+    ssh.PrivateKeyPath = "/home/me/.ssh/id_ed25519";
+    ssh.RemoteBindAddress = "0.0.0.0";          // needs GatewayPorts on the server
+    ssh.RemotePort = 8080;                      // 0 asks the server to allocate one
+    ssh.PublicUrl = "https://api.example.com";  // where it really answers, if a proxy fronts it
+    ssh.HostKeyFingerprints.Add("SHA256:47DEQpj8HBSa+…");
+});
+```
+
+Options are `SshTunnelOptions` from `Shiny.Net.HttpServer.Ssh` — the same type a MAUI app uses, so a
+tunnel is described identically on both sides. **Connecting fails unless a host key is pinned or
+`AcceptAnyHostKey` is set.** That is deliberate, not a bug to work around silently.
+
+## The Shiny relay (core)
+
+The public end of a Shiny tunnel, hosted in the app model: a control port where clients register and
+a public port where traffic arrives, routed by Host header. Use it when devices — a phone running
+Shiny.Net.HttpServer, an embedded server — need somewhere to register into a dev environment.
+
+```csharp
+var relay = builder.AddShinyRelay("relay", controlPort: 5050, publicPort: 8080)
+    .WithToken(builder.AddParameter("relay-token", secret: true))
+    .WithDomain("localtest.me", scheme: "http", includePort: true)
+    .WithBindAddress("0.0.0.0", clientHost: "192.168.1.20")   // so a phone can reach it
+    .ConfigureRelay(o => o.MaxTunnels = 20);
+
+api.WithShinyRelayTunnel(relay, subdomain: "api");
+```
+
+The relay's ports are its own, not Aspire-allocated — it listens inside the AppHost process, so pick
+free ports. Its connection string is `Host=…;Port=…;UseTls=…;Token=…`, matching the properties of
+`RelayTunnelOptions` on the client side.
+
+Against a relay elsewhere (your VPS), no relay resource is needed:
+
+```csharp
+api.WithShinyRelayTunnel("relay.example.com", port: 5050, token: token, subdomain: "api");
+```
+
+## Azure Relay (`.AzureRelay`)
+
+```csharp
+var cs = builder.AddParameter("relay-cs", secret: true);
+
+api.WithAzureRelayTunnel(cs, hybridConnectionName: "api");
+api.WithAzureRelayTunnel(cs, "api", configure: o => o.Mode = AzureRelayMode.Http);
+```
+
+The hybrid connection name may come from the connection string's `EntityPath` instead.
+
+## Container agents (`.Cloudflare`, `.Ngrok`)
+
+```csharp
+api.WithCloudflareTunnel();
+api.WithNgrokTunnel(builder.AddParameter("ngrok-token", secret: true));
+
+// A named Cloudflare tunnel on a host name you control — ingress is configured in Cloudflare,
+// so the URL is stated rather than discovered:
+builder.AddCloudflareTunnel("public")
+    .WithNamedTunnel(builder.AddParameter("cf-token", secret: true), "https://api.example.com");
+
+// A reserved ngrok domain:
+builder.AddNgrokTunnel("public", token)
+    .WithOrigin(api.GetEndpoint("http"))
+    .WithDomain("api.ngrok.app");
+```
+
+Both agents announce their assigned address in their own output; it is read back out of the
+container's log stream. ngrok **requires** an auth token — there is no anonymous mode.
+
+## Reaching a service through a bastion (`.Ssh`)
+
+The opposite direction: something the app model needs but cannot reach directly.
+
+```csharp
+var db = builder
+    .AddSshPortForward("staging-db", "bastion.example.com", "10.0.0.5", 5432, ssh =>
+    {
+        ssh.Username = "ops";
+        ssh.PrivateKeyPath = "/home/me/.ssh/id_ed25519";
+        ssh.AcceptAnyHostKey = true;
+    })
+    .WithLocalPort(15432)          // optional; ephemeral and stable across reconnects otherwise
+    .WithContainerAccess()         // binds 0.0.0.0 so container resources can reach it
+    .WithConnectionString(f => ReferenceExpression.Create(
+        $"Host={f.Host};Port={f.Port};Database=app;Username=app;Password={password}"
+    ));
+
+builder.AddProject<Projects.Api>("api").WithReference(db);
+```
+
+Without `WithConnectionString` the value is `host:port`. `f.Host` resolves per caller — `localhost`
+for a project, the container host bridge for a container.
+
+## A custom provider (core)
+
+```csharp
+var tunnel = builder.AddTunnel("public", "my-provider", (context, ct) =>
+    ValueTask.FromResult<ITunnelProvider>(
+        new MyProvider(context.TargetHost, context.TargetPort, context.LoggerFactory)
+    )
+);
+
+api.WithTunnel(tunnel);
+```
+
+`ITunnelProvider` is `Shiny.Net.HttpServer.Tunneling.ITunnelProvider` — an `IConnectionListener` that
+yields connections arriving from somewhere other than a local socket. Everything it yields is pumped
+into the target endpoint byte for byte, so WebSockets, SSE and gRPC streaming pass through unchanged.
+
+## Types
+
+```csharp
+namespace Aspire.Hosting.ApplicationModel;
+
+public interface ITunnelResource : IResource
+{
+    EndpointReference? TargetEndpoint { get; }
+    string? PublicUrl { get; }
+    ReferenceExpression PublicUrlExpression { get; }
+    Task<string> GetPublicUrlAsync(CancellationToken cancellationToken = default);
+}
+
+// In-process tunnels
+public abstract class TunnelResource : Resource, ITunnelResource, IResourceWithConnectionString, IResourceWithWaitSupport;
+public sealed class InProcessTunnelResource : TunnelResource;   // AddTunnel, relay, Azure Relay
+public sealed class SshTunnelResource : TunnelResource;         // AddSshTunnel, AddQuickTunnel
+
+// Container agents
+public abstract class ContainerTunnelResource : ContainerResource, ITunnelResource, IResourceWithConnectionString;
+public sealed class CloudflaredResource : ContainerTunnelResource;
+public sealed class NgrokResource : ContainerTunnelResource;
+
+// Not tunnels
+public sealed class ShinyRelayResource : Resource, IResourceWithConnectionString, IResourceWithWaitSupport;
+public sealed class SshPortForwardResource : Resource, IResourceWithConnectionString, IResourceWithWaitSupport;
+```
+
+## Tunnel Code Generation Best Practices
+
+1. **Publish a cleartext endpoint.** TLS is terminated at the public end of the tunnel, so what
+   arrives is plain HTTP. `http` is chosen by default for that reason; pass `endpointName` only to
+   name another cleartext endpoint. Pointing a tunnel at an `https` endpoint fails every request.
+2. **Use `ParameterResource` for every secret** — ngrok and Cloudflare tokens, relay tokens, Azure
+   Relay connection strings. Never hardcode them in the AppHost.
+3. **Never write an assigned URL into config.** Quick tunnels, cloudflared quick tunnels and free
+   ngrok tunnels get a new address on every reconnect. Pass it with `WithTunnelUrl` or
+   `WithReference`, and read the current one from the dashboard.
+4. **Name the tunnel when there is more than one on a target** — the default name collides.
+5. **Prefer the in-process providers** for anything that has to work on every machine and in CI:
+   they need no Docker, no binary and no account.
+6. **Pin host keys for an SSH server you own.** `AcceptAnyHostKey` is right for a throwaway hosted
+   endpoint and wrong for infrastructure you control.
+7. **Put authentication in front of anything that matters.** A tunnel hostname is unguessable, not
+   private, and anyone who has it can reach the service.
+8. **Do not expect tunnels in the manifest** — they are excluded on purpose, being a development-time
+   affordance for a machine that is not on the internet.

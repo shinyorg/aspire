@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>$(BaseTargetFramework)</TargetFramework>
+        <RootNamespace>Shiny.Aspire.Hosting.Tunnel.Ssh</RootNamespace>
+        <Description>SSH tunnelling for Aspire. Publishes a project or container endpoint through any SSH endpoint you can log in to - including zero-account quick tunnels - and reaches services on the other side of a bastion.</Description>
+        <PackageTags>aspire tunnel ssh pinggy webhook shiny</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Shiny.Aspire.Hosting.Tunnel.Tests"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Shiny.Net.HttpServer.Ssh"/>
+        <PackageReference Include="SSH.NET"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Shiny.Aspire.Hosting.Tunnel/Shiny.Aspire.Hosting.Tunnel.csproj"/>
+    </ItemGroup>
+
+</Project>

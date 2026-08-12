@@ -21,6 +21,12 @@
                           IsAspireProjectResource="false"/>
         <ProjectReference Include="..\..\src\Shiny.Aspire.Hosting.Gluetun\Shiny.Aspire.Hosting.Gluetun.csproj"
                           IsAspireProjectResource="false"/>
+        <ProjectReference Include="..\..\src\Shiny.Aspire.Hosting.Tunnel\Shiny.Aspire.Hosting.Tunnel.csproj"
+                          IsAspireProjectResource="false"/>
+        <ProjectReference Include="..\..\src\Shiny.Aspire.Hosting.Tunnel.Ssh\Shiny.Aspire.Hosting.Tunnel.Ssh.csproj"
+                          IsAspireProjectResource="false"/>
+        <ProjectReference Include="..\..\src\Shiny.Aspire.Hosting.Tunnel.Cloudflare\Shiny.Aspire.Hosting.Tunnel.Cloudflare.csproj"
+                          IsAspireProjectResource="false"/>
     </ItemGroup>
 
 </Project>
